@@ -1,0 +1,42 @@
+[general]
+poll_interval_minutes = 15
+target_languages = ["fr", "en"]
+save_original_srt = true
+
+[server]
+host = "0.0.0.0"
+port = 8385
+
+[whisper]
+binary = "/opt/homebrew/bin/whisper-cli"
+model = "~/02_perso/whisper/models/ggml-large-v3-turbo.bin"
+language = "auto"
+
+[ffmpeg]
+binary = "/opt/homebrew/bin/ffmpeg"
+
+[translator]
+endpoint = "http://localhost:8384"
+timeout_seconds = 300
+max_retries = 3
+
+[sonarr]
+url = "http://SERVEUR:8989"
+api_key = "CHANGE_ME"
+lookback_days = 7
+
+[radarr]
+url = "http://SERVEUR:7878"
+api_key = "CHANGE_ME"
+lookback_days = 7
+
+[[path_mappings]]
+remote_prefix = "/data/tv"
+local_prefix = "/Volumes/media/tv"
+
+[[path_mappings]]
+remote_prefix = "/data/movies"
+local_prefix = "/Volumes/media/movies"
+
+[database]
+url = "sqlite:~/.local/share/subsforge/subsforge.db?mode=rwc"

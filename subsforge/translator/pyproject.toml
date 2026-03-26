@@ -1,0 +1,16 @@
+[project]
+name = "subsforge-translator"
+version = "0.1.0"
+description = "NLLB-200 translation server for SubsForge"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "transformers>=4.47",
+    "torch>=2.5",
+    "sentencepiece>=0.2",
+    "protobuf>=5",
+]
+
+[project.scripts]
+translator = "server:app"
