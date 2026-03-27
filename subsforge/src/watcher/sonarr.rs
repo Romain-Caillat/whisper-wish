@@ -12,125 +12,77 @@ pub struct MediaItem {
 }
 
 #[derive(Deserialize)]
-struct HistoryRecord {
-    #[serde(rename = "sourceTitle")]
-    source_title: Option<String>,
-    #[serde(rename = "episodeId")]
-    episode_id: Option<i64>,
-    #[serde(rename = "eventType")]
-    event_type: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct HistoryResponse {
-    records: Vec<HistoryRecord>,
+struct Series {
+    id: i64,
+    title: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct EpisodeFile {
+    id: i64,
     path: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct Episode {
-    #[serde(rename = "episodeFileId")]
-    episode_file_id: Option<i64>,
-    title: Option<String>,
     #[serde(rename = "seasonNumber")]
     season_number: Option<i64>,
-    #[serde(rename = "episodeNumber")]
-    episode_number: Option<i64>,
-    series: Option<Series>,
 }
 
-#[derive(Deserialize)]
-struct Series {
-    title: Option<String>,
-}
-
-/// Fetch recently imported episodes from Sonarr.
-pub async fn fetch_recent(config: &ArrConfig, client: &Client) -> anyhow::Result<Vec<MediaItem>> {
-    let since = chrono::Utc::now() - chrono::Duration::days(config.lookback_days as i64);
-    let _since_str = since.format("%Y-%m-%d").to_string();
-
-    let history: HistoryResponse = client
-        .get(format!("{}/api/v3/history", config.url))
+/// Fetch all episodes with files from Sonarr by scanning the full library.
+pub async fn fetch_all(config: &ArrConfig, client: &Client) -> anyhow::Result<Vec<MediaItem>> {
+    // 1. Get all series
+    let series_list: Vec<Series> = client
+        .get(format!("{}/api/v3/series", config.url))
         .header("X-Api-Key", &config.api_key)
-        .query(&[
-            ("eventType", "grabbed"),
-            ("sortKey", "date"),
-            ("sortDirection", "descending"),
-            ("pageSize", "50"),
-        ])
         .send()
         .await?
         .json()
         .await?;
 
+    info!(count = series_list.len(), "found series in Sonarr");
+
     let mut items = Vec::new();
 
-    for record in &history.records {
-        let episode_id = match record.episode_id {
-            Some(id) if id > 0 => id,
-            _ => continue,
-        };
+    // 2. For each series, get all episode files
+    for series in &series_list {
+        let series_title = series.title.as_deref().unwrap_or("Unknown");
 
-        // Fetch episode details to get file path
-        let episode: Episode = match client
-            .get(format!("{}/api/v3/episode/{}", config.url, episode_id))
+        let files: Vec<EpisodeFile> = match client
+            .get(format!("{}/api/v3/episodefile", config.url))
             .header("X-Api-Key", &config.api_key)
+            .query(&[("seriesId", &series.id.to_string())])
             .send()
             .await
         {
             Ok(resp) => match resp.json().await {
-                Ok(ep) => ep,
+                Ok(f) => f,
                 Err(e) => {
-                    warn!(episode_id, error = %e, "failed to parse episode");
+                    warn!(series = series_title, error = %e, "failed to parse episode files");
                     continue;
                 }
             },
             Err(e) => {
-                warn!(episode_id, error = %e, "failed to fetch episode");
+                warn!(series = series_title, error = %e, "failed to fetch episode files");
                 continue;
             }
         };
 
-        let file_id = match episode.episode_file_id {
-            Some(id) if id > 0 => id,
-            _ => continue,
-        };
+        for file in &files {
+            if let Some(path) = &file.path {
+                let season = file.season_number.unwrap_or(0);
+                // Extract episode info from filename
+                let filename = std::path::Path::new(path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let title = format!("{series_title} S{season:02} - {filename}");
 
-        let episode_file: EpisodeFile = match client
-            .get(format!("{}/api/v3/episodefile/{}", config.url, file_id))
-            .header("X-Api-Key", &config.api_key)
-            .send()
-            .await
-        {
-            Ok(resp) => match resp.json().await {
-                Ok(ef) => ef,
-                Err(_) => continue,
-            },
-            Err(_) => continue,
-        };
-
-        if let Some(path) = episode_file.path {
-            let series_title = episode.series.as_ref()
-                .and_then(|s| s.title.as_deref())
-                .unwrap_or("Unknown");
-            let season = episode.season_number.unwrap_or(0);
-            let ep_num = episode.episode_number.unwrap_or(0);
-            let ep_title = episode.title.as_deref().unwrap_or("");
-
-            let title = format!("{series_title} S{season:02}E{ep_num:02} - {ep_title}");
-
-            items.push(MediaItem {
-                path,
-                title,
-                source_id: episode_id,
-            });
+                items.push(MediaItem {
+                    path: path.clone(),
+                    title,
+                    source_id: file.id,
+                });
+            }
         }
     }
 
-    info!(count = items.len(), "fetched recent episodes from Sonarr");
+    info!(count = items.len(), "fetched all episodes from Sonarr");
     Ok(items)
 }

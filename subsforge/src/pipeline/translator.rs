@@ -44,7 +44,9 @@ pub fn to_nllb_code(iso_code: &str) -> &str {
     }
 }
 
-/// Translate a batch of texts using the NLLB-200 translation server.
+const CHUNK_SIZE: usize = 64;
+
+/// Translate texts using the NLLB-200 translation server, chunked to avoid OOM.
 pub async fn translate(
     config: &TranslatorConfig,
     client: &Client,
@@ -57,11 +59,30 @@ pub async fn translate(
 
     info!(
         count = texts.len(),
+        chunks = (texts.len() + CHUNK_SIZE - 1) / CHUNK_SIZE,
         from = src,
         to = tgt,
-        "translating batch"
+        "translating"
     );
 
+    let mut all_translations = Vec::with_capacity(texts.len());
+
+    for (i, chunk) in texts.chunks(CHUNK_SIZE).enumerate() {
+        info!(chunk = i + 1, size = chunk.len(), "translating chunk");
+        let translated = translate_chunk(config, client, chunk, src, tgt).await?;
+        all_translations.extend(translated);
+    }
+
+    Ok(all_translations)
+}
+
+async fn translate_chunk(
+    config: &TranslatorConfig,
+    client: &Client,
+    texts: &[String],
+    src: &str,
+    tgt: &str,
+) -> Result<Vec<String>> {
     let mut last_error = None;
 
     for attempt in 0..config.max_retries {

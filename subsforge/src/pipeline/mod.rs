@@ -62,8 +62,10 @@ pub async fn process_job(
     // Save original language SRT if configured
     if config.general.save_original_srt {
         let original_srt_path = naming::srt_path(media_path, detected_lang);
-        tokio::fs::write(&original_srt_path, &whisper_result.srt_content).await?;
-        info!(path = %original_srt_path.display(), "saved original SRT");
+        match tokio::fs::write(&original_srt_path, &whisper_result.srt_content).await {
+            Ok(_) => info!(path = %original_srt_path.display(), "saved original SRT"),
+            Err(e) => error!(path = %original_srt_path.display(), error = %e, "failed to save original SRT (read-only filesystem?)"),
+        }
     }
 
     // 4. Translate to each target language
@@ -77,7 +79,11 @@ pub async fn process_job(
         if target_lang == detected_lang {
             // Source == target: just copy the original SRT
             let out_path = naming::srt_path(media_path, target_lang);
-            tokio::fs::write(&out_path, &whisper_result.srt_content).await?;
+            if let Err(e) = tokio::fs::write(&out_path, &whisper_result.srt_content).await {
+                error!(path = %out_path.display(), error = %e, "failed to write SRT");
+                db::update_translation_status(pool, translation.id, "failed", None, Some(&e.to_string())).await?;
+                continue;
+            }
             db::update_translation_status(
                 pool,
                 translation.id,
@@ -103,7 +109,11 @@ pub async fn process_job(
                     Ok(translated_entries) => {
                         let out_path = naming::srt_path(media_path, target_lang);
                         let content = srt::serialize(&translated_entries);
-                        tokio::fs::write(&out_path, &content).await?;
+                        if let Err(e) = tokio::fs::write(&out_path, &content).await {
+                            error!(path = %out_path.display(), error = %e, "failed to write translated SRT");
+                            db::update_translation_status(pool, translation.id, "failed", None, Some(&e.to_string())).await?;
+                            continue;
+                        }
                         db::update_translation_status(
                             pool,
                             translation.id,

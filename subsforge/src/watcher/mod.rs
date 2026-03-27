@@ -32,9 +32,9 @@ async fn poll_and_process(
 ) -> anyhow::Result<()> {
     let mut media_items = Vec::new();
 
-    // Fetch from Sonarr
+    // Fetch full library from Sonarr
     if let Some(sonarr_config) = &config.sonarr {
-        match sonarr::fetch_recent(sonarr_config, client).await {
+        match sonarr::fetch_all(sonarr_config, client).await {
             Ok(items) => {
                 for item in items {
                     media_items.push(("sonarr", item));
@@ -44,9 +44,9 @@ async fn poll_and_process(
         }
     }
 
-    // Fetch from Radarr
+    // Fetch full library from Radarr
     if let Some(radarr_config) = &config.radarr {
-        match radarr::fetch_recent(radarr_config, client).await {
+        match radarr::fetch_all(radarr_config, client).await {
             Ok(items) => {
                 for item in items {
                     media_items.push(("radarr", item));
